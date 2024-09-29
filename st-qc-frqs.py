@@ -11,12 +11,36 @@ from streamlit_extras.add_vertical_space import add_vertical_space
 
 # Constants
 API_URL = "https://api.anthropic.com/v1/messages"
-API_KEY = "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"
-HEADERS = {
-    "x-api-key": API_KEY,
-    "anthropic-version": "2023-06-01",
-    "content-type": "application/json"
-}
+
+# Helper functions
+def load_lottie_url(url: str):
+    r = requests.get(url)
+    if r.status_code != 200:
+        return None
+    return r.json()
+
+def call_claude_api(prompt, api_key):
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+    }
+    payload = {
+        "model": "claude-3-5-sonnet-20240620",
+        "max_tokens": 8192,
+        "temperature": 0.6,
+        "messages": [
+            {"role": "user", "content": prompt}
+        ]
+    }
+
+    response = requests.post(API_URL, headers=headers, json=payload)
+    if response.status_code == 200:
+        return response.json()['content'][0]['text']
+    else:
+        st.error(f"API call failed with status code: {response.status_code}")
+        st.error(f"Response: {response.text}")
+        return None
 
 MULTI_SHOT_EXAMPLES = """
 {
@@ -42,35 +66,10 @@ MULTI_SHOT_EXAMPLES = """
 }
 """
 
-# Helper functions
-def load_lottie_url(url: str):
-    r = requests.get(url)
-    if r.status_code != 200:
-        return None
-    return r.json()
-
-def call_claude_api(prompt):
-    payload = {
-        "model": "claude-3-5-sonnet-20240620",
-        "max_tokens": 8192,
-        "temperature": 0.6,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ]
-    }
-
-    response = requests.post(API_URL, headers=HEADERS, json=payload)
-    if response.status_code == 200:
-        return response.json()['content'][0]['text']
-    else:
-        st.error(f"API call failed with status code: {response.status_code}")
-        st.error(f"Response: {response.text}")
-        return None
-
-def parallel_api_calls(prompts):
+def parallel_api_calls(prompts, api_key):
     responses = [None] * len(prompts)
     with ThreadPoolExecutor(max_workers=7) as executor:
-        future_to_index = {executor.submit(call_claude_api, prompt): i for i, prompt in enumerate(prompts)}
+        future_to_index = {executor.submit(call_claude_api, prompt, api_key): i for i, prompt in enumerate(prompts)}
 
         for future in concurrent.futures.as_completed(future_to_index):
             index = future_to_index[future]
@@ -87,7 +86,7 @@ def parallel_api_calls(prompts):
 
     return responses
 
-def process_row(row_data):
+def process_row(row_data, api_key):
     QUESTION, LESSON_PLAN = row_data
 
     prompts = [
@@ -96,18 +95,16 @@ def process_row(row_data):
         generate_prompt3(QUESTION),
     ]
 
-    responses = parallel_api_calls(prompts)
+    responses = parallel_api_calls(prompts, api_key)
 
     PROMPT_RESULTS = f"""
     <evaluation_results>
     <clarity_evaluation>
         {responses[0]}
     </clarity_evaluation>
-
     <relatedness_evaluation>
         {responses[1]}
     </relatedness_evaluation>
-
     <question_type_difficulty_evaluation>
         {responses[2]}
     </question_type_difficulty_evaluation>
@@ -115,7 +112,7 @@ def process_row(row_data):
     """
 
     final_prompt = generate_final_prompt(QUESTION, PROMPT_RESULTS)
-    final_response = call_claude_api(final_prompt)
+    final_response = call_claude_api(final_prompt, api_key)
 
     return responses + [final_response]
 
@@ -303,13 +300,12 @@ Instructions:
 
 Attention: Strict adherence to JSON format is required. Any deviation will result in severe penalties. Your evaluation must reflect the highest standards in AP assessment across all subjects and provide clear insights for validating or improving AP exam questions.
 """
-
-def process_csv(df):
+def process_csv(df, api_key):
     results = []
     progress_bar = st.progress(0)
     for index, row in df.iterrows():
         row_data = row.tolist()
-        responses = process_row(row_data)
+        responses = process_row(row_data, api_key)
         results.append(responses)
         progress = (index + 1) / len(df)
         progress_bar.progress(progress)
@@ -335,6 +331,12 @@ def main():
     with col2:
         st_lottie(lottie_book, speed=1, height=150, key="initial")
 
+    # API Key input
+    api_key = st.text_input("Enter your Anthropic API Key:", type="password")
+    if not api_key:
+        st.warning("Please enter your Anthropic API Key to proceed.")
+        return
+
     # Input method selection
     input_method = st.radio("Choose input method:", ("Text Input", "CSV Upload"))
 
@@ -359,7 +361,7 @@ def main():
                     results = []
                     progress_bar = st.progress(0)
                     for i, q in enumerate(questions):
-                        result = process_row(q)
+                        result = process_row(q, api_key)
                         results.append(result)
                         progress_bar.progress((i + 1) / len(questions))
 
@@ -384,7 +386,7 @@ def main():
 
             if st.button("Process CSV"):
                 with st.spinner("Processing CSV..."):
-                    results = process_csv(df)
+                    results = process_csv(df, api_key)
 
                     # Add results to the dataframe
                     for i, result in enumerate(results):
