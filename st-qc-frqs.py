@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import base64
 from streamlit_lottie import st_lottie
 from streamlit_extras.add_vertical_space import add_vertical_space
+import threading
 
 # Constants
 API_URL = "https://api.anthropic.com/v1/messages"
@@ -42,30 +43,6 @@ def call_claude_api(prompt, api_key):
         st.error(f"Response: {response.text}")
         return None
 
-MULTI_SHOT_EXAMPLES = """
-{
-  "questions": [
-    {
-      "level": "Question Level",
-      "detail": "Question",
-      "expectation": "The question is not ambiguous. There is only one interpretation and enough information is provided to correctly respond to the question if you have studied the topic. There are not multiple interpretations of the question",
-      "examples": [
-        {
-          "question": "The painting shows the Emperor Qianlong is dressed as a Tibetan Buddhist teacher (lama). The Bodhisattva Manjusri is a major figure worshiped in the Tibetan Buddhist religious tradition. Which of the following is an example of a religious policy most similar to the one represented by the painting?\n\nA Spanish colonial authorities forcing the conversion of Native Americans to Christianity\nB European rulers participating in religious wars during the Protestant Reformation\nC Mughal rulers sponsoring Hindu learning and conversing with Hindu preachers\nD Merchants and Sufi mystics helping to spread Islam into Southeast Asia and sub-Saharan Africa",
-          "pass": true,
-          "reason": "The question relies on the readers broader understanding of the topic, but does provide the context and reference needed to know which is the correct response."
-        },
-        {
-          "question": "What is the average atomic mass of chlorine based on the given isotopic masses and their relative abundances?\nA 35.438 amu\nB 34.968 amu\nC 36.000 amu\nD  37.500 amu\n",
-          "pass": false,
-          "reason": "The question suggests that the isotopic mass and relative abundance is offered, but it is not provided. The student could not calculate a value without this data."
-        }
-      ]
-    }
-  ]
-}
-"""
-
 def parallel_api_calls(prompts, api_key):
     responses = [None] * len(prompts)
     with ThreadPoolExecutor(max_workers=7) as executor:
@@ -87,34 +64,72 @@ def parallel_api_calls(prompts, api_key):
     return responses
 
 def process_row(row_data, api_key):
-    QUESTION, LESSON_PLAN = row_data
+    try:
+        QUESTION, LESSON_PLAN = row_data
 
-    prompts = [
-        generate_prompt1(QUESTION),
-        generate_prompt2(QUESTION, LESSON_PLAN),
-        generate_prompt3(QUESTION),
-    ]
+        prompts = [
+            generate_prompt1(QUESTION),
+            generate_prompt2(QUESTION, LESSON_PLAN),
+            generate_prompt3(QUESTION),
+        ]
 
-    responses = parallel_api_calls(prompts, api_key)
+        responses = parallel_api_calls(prompts, api_key)
 
-    PROMPT_RESULTS = f"""
-    <evaluation_results>
-    <clarity_evaluation>
-        {responses[0]}
-    </clarity_evaluation>
-    <relatedness_evaluation>
-        {responses[1]}
-    </relatedness_evaluation>
-    <question_type_difficulty_evaluation>
-        {responses[2]}
-    </question_type_difficulty_evaluation>
-    </evaluation_results>
-    """
+        PROMPT_RESULTS = f"""
+        <evaluation_results>
+        <clarity_evaluation>
+            {responses[0]}
+        </clarity_evaluation>
+        <relatedness_evaluation>
+            {responses[1]}
+        </relatedness_evaluation>
+        <question_type_difficulty_evaluation>
+            {responses[2]}
+        </question_type_difficulty_evaluation>
+        </evaluation_results>
+        """
 
-    final_prompt = generate_final_prompt(QUESTION, PROMPT_RESULTS)
-    final_response = call_claude_api(final_prompt, api_key)
+        final_prompt = generate_final_prompt(QUESTION, PROMPT_RESULTS)
+        final_response = call_claude_api(final_prompt, api_key)
 
-    return responses + [final_response]
+        return responses + [final_response]
+    except Exception as e:
+        st.error(f"Error in process_row: {str(e)}")
+        return ["NA"] * 4
+    
+MULTI_SHOT_EXAMPLES = """{
+  "questions": [
+    {
+      "level": "Question Level",
+      "detail": "Question",
+      "expectation": "The question is not ambiguous. There is only one interpretation and enough information is provided to correctly respond to the question if you have studied the topic. There are not multiple interpretations of the question",
+      "examples": [
+        {
+          "question": "The painting shows the Emperor Qianlong is dressed as a Tibetan Buddhist teacher (lama). The Bodhisattva Manjusri is a major figure worshiped in the Tibetan Buddhist religious tradition. Which of the following is an example of a religious policy most similar to the one represented by the painting?\n\nA Spanish colonial authorities forcing the conversion of Native Americans to Christianity\nB European rulers participating in religious wars during the Protestant Reformation\nC Mughal rulers sponsoring Hindu learning and conversing with Hindu preachers\nD Merchants and Sufi mystics helping to spread Islam into Southeast Asia and sub-Saharan Africa",
+          "pass": true,
+          "reason": "The question relies on the readers broader understanding of the topic, but does provide the context and reference needed to know which is the correct response."
+        },
+        {
+          "question": "What is the average atomic mass of chlorine based on the given isotopic masses and their relative abundances?\nA 35.438 amu\nB 34.968 amu\nC 36.000 amu\nD  37.500 amu\n",
+          "pass": false,
+          "reason": "The question suggests that the isotopic mass and relative abundance is offered, but it is not provided. The student could not calculate a value without this data."
+        },
+        {
+          "question": "In a chemical reaction, if 0.5 moles of a reactant decompose to produce a product, how many molecules of the product are formed? (Use Avogadro's number, which is approximately $6.022 \\times 10^{23}$ molecules/mole) \na 3.01 x 10^23 molecules\nb 6.02 x 10^23 molecules\nc 4.01 x 10^23 molecules\nd 1.00 x 10^24 molecules\n",
+          "pass": false,
+          "reason": "The answer to this question is dependent on the stoichiometry of the deomposition"
+        },
+        {
+          "question": "Question: What was the primary purpose of the tribute system developed by the Song Dynasty?\nA. To deter aggressors through the display of wealth\nB. To promote cultural exchange with neighboring states\nC. To support the funding of public projects\nD. To prevent internal conflicts within the Dynasty",
+          "pass": true,
+          "reason": "The question relies on the student's understanding of the material to respond. There is only one interpretation of the question, enough context is provided to choose the correct response."
+        }
+      ]
+    }
+  ]
+}
+
+"""
 
 def generate_prompt1(QUESTION):
     return f"""
@@ -300,15 +315,36 @@ Instructions:
 
 Attention: Strict adherence to JSON format is required. Any deviation will result in severe penalties. Your evaluation must reflect the highest standards in AP assessment across all subjects and provide clear insights for validating or improving AP exam questions.
 """
-def process_csv(df, api_key):
+
+def process_csv(df, api_key, start_row, end_row, progress_bar, stop_flag, download_button):
     results = []
-    progress_bar = st.progress(0)
-    for index, row in df.iterrows():
-        row_data = row.tolist()
-        responses = process_row(row_data, api_key)
-        results.append(responses)
-        progress = (index + 1) / len(df)
+    for index, row in df.iloc[start_row:end_row+1].iterrows():
+        if stop_flag.is_set():
+            break
+        try:
+            row_data = row.tolist()
+            responses = process_row(row_data, api_key)
+            results.append(responses)
+        except Exception as e:
+            st.error(f"Error processing row {index}: {str(e)}")
+            responses = ["NA"] * 4  # Add NA for all 4 columns
+            results.append(responses)
+        
+        # Update the DataFrame after each row is processed
+        for j in range(min(3, len(responses))):
+            df.loc[index, f'Evaluation_{j+1}'] = responses[j]
+        
+        if len(responses) > 3:
+            df.loc[index, 'Final_Evaluation'] = responses[3]
+        else:
+            df.loc[index, 'Final_Evaluation'] = "NA"
+        
+        progress = (index - start_row + 1) / (end_row - start_row + 1)
         progress_bar.progress(progress)
+        
+        # Update the download button after each row
+        download_button.markdown(get_csv_download_link(df), unsafe_allow_html=True)
+    
     return results
 
 def get_csv_download_link(df, filename="processed_frqs.csv"):
@@ -384,18 +420,38 @@ def main():
             df = pd.read_csv(uploaded_file)
             st.write(df)
 
+            # Row range selection
+            col1, col2 = st.columns(2)
+            with col1:
+                start_row = st.number_input("Start Row", min_value=0, max_value=len(df)-1, value=0)
+            with col2:
+                end_row = st.number_input("End Row", min_value=start_row, max_value=len(df)-1, value=len(df)-1)
+
             if st.button("Process CSV"):
+                progress_bar = st.progress(0)
+                stop_flag = threading.Event()
+                
+                # Create placeholders for pause button and download button
+                pause_button = st.empty()
+                download_button = st.empty()
+                
+                def pause_processing():
+                    stop_flag.set()
+                    st.warning("Processing paused. You can download the CSV with processed rows so far.")
+                    # Ensure the download button is visible when paused
+                    download_button.markdown(get_csv_download_link(df), unsafe_allow_html=True)
+
+                pause_button.button("Pause Processing", on_click=pause_processing)
+
                 with st.spinner("Processing CSV..."):
-                    results = process_csv(df, api_key)
+                    results = process_csv(df, api_key, start_row, end_row, progress_bar, stop_flag, download_button)
 
-                    # Add results to the dataframe
-                    for i, result in enumerate(results):
-                        for j, response in enumerate(result[:3]):
-                            df.loc[i, f'Evaluation_{j+1}'] = response
-                        df.loc[i, 'Final_Evaluation'] = result[3]
+                if stop_flag.is_set():
+                    st.success("Processing paused. You can download the CSV with processed rows above.")
+                else:
+                    st.success("Processing completed. You can download the full CSV above.")
 
-                    st.write(df)
-                    st.markdown(get_csv_download_link(df), unsafe_allow_html=True)
+                st.write(df)
 
 if __name__ == "__main__":
     main()
