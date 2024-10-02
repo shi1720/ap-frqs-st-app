@@ -62,40 +62,6 @@ def parallel_api_calls(prompts, api_key):
             responses[i] = "No response received"
 
     return responses
-
-def process_row(row_data, api_key):
-    try:
-        QUESTION, LESSON_PLAN = row_data
-
-        prompts = [
-            generate_prompt1(QUESTION),
-            generate_prompt2(QUESTION, LESSON_PLAN),
-            generate_prompt3(QUESTION),
-        ]
-
-        responses = parallel_api_calls(prompts, api_key)
-
-        PROMPT_RESULTS = f"""
-        <evaluation_results>
-        <clarity_evaluation>
-            {responses[0]}
-        </clarity_evaluation>
-        <relatedness_evaluation>
-            {responses[1]}
-        </relatedness_evaluation>
-        <question_type_difficulty_evaluation>
-            {responses[2]}
-        </question_type_difficulty_evaluation>
-        </evaluation_results>
-        """
-
-        final_prompt = generate_final_prompt(QUESTION, PROMPT_RESULTS)
-        final_response = call_claude_api(final_prompt, api_key)
-
-        return responses + [final_response]
-    except Exception as e:
-        st.error(f"Error in process_row: {str(e)}")
-        return ["NA"] * 4
     
 MULTI_SHOT_EXAMPLES = """{
   "questions": [
@@ -315,29 +281,59 @@ Instructions:
 
 Attention: Strict adherence to JSON format is required. Any deviation will result in severe penalties. Your evaluation must reflect the highest standards in AP assessment across all subjects and provide clear insights for validating or improving AP exam questions.
 """
+def process_row(row_data, api_key, prompt_states, edited_prompts):
+    QUESTION, LESSON_PLAN = row_data
 
-def process_csv(df, api_key, start_row, end_row, progress_bar, stop_flag, download_button):
+    def format_prompt(prompt_template, **kwargs):
+        for key, value in kwargs.items():
+            prompt_template = prompt_template.replace(f"{{{{{key}}}}}", str(value))
+        return prompt_template
+
+    prompts = [
+        format_prompt(edited_prompts['prompt1'], QUESTION=QUESTION) if prompt_states["prompt1"] else None,
+        format_prompt(edited_prompts['prompt2'], QUESTION=QUESTION, LESSON_PLAN=LESSON_PLAN) if prompt_states["prompt2"] else None,
+        format_prompt(edited_prompts['prompt3'], QUESTION=QUESTION) if prompt_states["prompt3"] else None,
+    ]
+
+    # Filter out None values (disabled prompts)
+    prompts = [p for p in prompts if p is not None]
+
+    responses = parallel_api_calls(prompts, api_key)
+
+    # Prepare PROMPT_RESULTS
+    PROMPT_RESULTS = "<evaluation_results>\n"
+    for i, response in enumerate(responses):
+        PROMPT_RESULTS += f"<evaluation_{i+1}>\n{response}\n</evaluation_{i+1}>\n"
+    PROMPT_RESULTS += "</evaluation_results>"
+
+    final_prompt = format_prompt(edited_prompts['final_prompt'], QUESTION=QUESTION, PROMPT_RESULTS=PROMPT_RESULTS)
+    final_response = call_claude_api(final_prompt, api_key)
+
+    return responses + [final_response]
+
+def get_csv_download_link(df, filename="processed_frqs.csv"):
+    csv = df.to_csv(index=False)
+    b64 = base64.b64encode(csv.encode()).decode()
+    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">Download Processed CSV</a>'
+    return href
+
+def process_csv(df, api_key, start_row, end_row, progress_bar, stop_flag, download_button, prompt_states, edited_prompts):
     results = []
     for index, row in df.iloc[start_row:end_row+1].iterrows():
         if stop_flag.is_set():
             break
         try:
             row_data = row.tolist()
-            responses = process_row(row_data, api_key)
+            responses = process_row(row_data, api_key, prompt_states, edited_prompts)
             results.append(responses)
         except Exception as e:
             st.error(f"Error processing row {index}: {str(e)}")
-            responses = ["NA"] * 4  # Add NA for all 4 columns
-            results.append(responses)
+            results.append(["NA"] * 4)  # Add NA for all 4 columns
         
         # Update the DataFrame after each row is processed
-        for j in range(min(3, len(responses))):
-            df.loc[index, f'Evaluation_{j+1}'] = responses[j]
-        
-        if len(responses) > 3:
-            df.loc[index, 'Final_Evaluation'] = responses[3]
-        else:
-            df.loc[index, 'Final_Evaluation'] = "NA"
+        for j, response in enumerate(results[-1][:3]):
+            df.loc[index, f'Evaluation_{j+1}'] = response
+        df.loc[index, 'Final_Evaluation'] = results[-1][3]
         
         progress = (index - start_row + 1) / (end_row - start_row + 1)
         progress_bar.progress(progress)
@@ -346,12 +342,6 @@ def process_csv(df, api_key, start_row, end_row, progress_bar, stop_flag, downlo
         download_button.markdown(get_csv_download_link(df), unsafe_allow_html=True)
     
     return results
-
-def get_csv_download_link(df, filename="processed_frqs.csv"):
-    csv = df.to_csv(index=False)
-    b64 = base64.b64encode(csv.encode()).decode()
-    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">Download Processed CSV</a>'
-    return href
 
 def main():
     st.set_page_config(page_title="AP FRQ Evaluation", page_icon="📝", layout="wide")
@@ -372,6 +362,28 @@ def main():
     if not api_key:
         st.warning("Please enter your Anthropic API Key to proceed.")
         return
+
+    # Prompt editing and enabling/disabling
+    st.header("Prompts Configuration")
+    prompt_states = {}
+    edited_prompts = {}
+
+    for i in range(1, 4):
+        st.subheader(f"Prompt {i}")
+        prompt_states[f"prompt{i}"] = st.checkbox(f"Enable Prompt {i}", value=True)
+        
+        if i == 1:
+            default_prompt = generate_prompt1("{{QUESTION}}")
+        elif i == 2:
+            default_prompt = generate_prompt2("{{QUESTION}}", "{{LESSON_PLAN}}")
+        elif i == 3:
+            default_prompt = generate_prompt3("{{QUESTION}}")
+        
+        edited_prompts[f"prompt{i}"] = st.text_area(f"Edit Prompt {i}", value=default_prompt, height=400)
+
+    st.subheader("Final Prompt")
+    default_final_prompt = generate_final_prompt("{{QUESTION}}", "{{PROMPT_RESULTS}}")
+    edited_prompts["final_prompt"] = st.text_area("Edit Final Prompt", value=default_final_prompt, height=400)
 
     # Input method selection
     input_method = st.radio("Choose input method:", ("Text Input", "CSV Upload"))
@@ -397,7 +409,7 @@ def main():
                     results = []
                     progress_bar = st.progress(0)
                     for i, q in enumerate(questions):
-                        result = process_row(q, api_key)
+                        result = process_row(q, api_key, prompt_states, edited_prompts)
                         results.append(result)
                         progress_bar.progress((i + 1) / len(questions))
 
@@ -406,15 +418,16 @@ def main():
                         st.write(f"**Question:** {question[0]}")
                         
                         for j, response in enumerate(result[:3]):
-                            with st.expander(f"Evaluation {j+1}"):
-                                st.json(json.loads(response))
+                            if prompt_states[f"prompt{j+1}"]:
+                                with st.expander(f"Evaluation {j+1}"):
+                                    st.json(json.loads(response))
                         
                         with st.expander("Final Evaluation"):
-                            st.json(json.loads(result[3]))
+                            st.json(json.loads(result[-1]))
             else:
                 st.warning("Please enter at least one FRQ to evaluate.")
 
-    else:  # CSV Upload
+    if input_method == "CSV Upload":
         uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
         if uploaded_file is not None:
             df = pd.read_csv(uploaded_file)
@@ -444,7 +457,7 @@ def main():
                 pause_button.button("Pause Processing", on_click=pause_processing)
 
                 with st.spinner("Processing CSV..."):
-                    results = process_csv(df, api_key, start_row, end_row, progress_bar, stop_flag, download_button)
+                    results = process_csv(df, api_key, start_row, end_row, progress_bar, stop_flag, download_button, prompt_states, edited_prompts)
 
                 if stop_flag.is_set():
                     st.success("Processing paused. You can download the CSV with processed rows above.")
