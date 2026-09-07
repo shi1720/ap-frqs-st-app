@@ -1,0 +1,22 @@
+
+
+# Local credentials and generated work
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*credentials*.json
+*service-account*.json
+*.pem
+*.key
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+node_modules/
+.DS_Store
+*.log

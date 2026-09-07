@@ -1,77 +1,59 @@
-# AP FRQ Evaluation App
+# AP Free-Response Question Review
 
-## Overview
+Review AP free-response questions in batches using configurable evaluation prompts, parallel requests and downloadable feedback.
 
-The AP FRQ Evaluation App is a powerful tool designed to assist educators and content creators in evaluating and improving Advanced Placement (AP) Free Response Questions (FRQs). This app uses advanced AI to analyze questions based on various criteria, ensuring they meet the rigorous standards required for AP exams.
+**Stack:** Python / Streamlit. **Status:** reference implementation. Provider integrations require your own credentials and service access.
 
-**Live App**: [https://ap-frqs-st-app.streamlit.app/](https://ap-frqs-st-app.streamlit.app/)
+## Run locally
 
-## Features
+Use Python 3.12 and a virtual environment. Commands below run from the repository root.
 
-- **Dual Input Methods**: 
-  - Text input for individual FRQs
-  - CSV upload for bulk processing
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --require-hashes -r requirements.lock.txt
+```
 
-- **Comprehensive Evaluation**:
-  - Clarity and structure analysis
-  - Relevance and curriculum alignment assessment
-  - Difficulty and grade level evaluation
-  - Final holistic assessment
+Where the interface asks for a provider key or backend address, supply your own authorized configuration at runtime. The repository does not supply access to an external service.
 
-- **Detailed Feedback**: 
-  - Individual scores for each evaluation aspect
-  - Final evaluation with strengths and weaknesses
-  - Actionable feedback for improvement
+```bash
+python -m streamlit run st-qc-frqs.py --server.address 127.0.0.1
+```
 
-- **User-Friendly Interface**:
-  - Interactive Streamlit app
-  - Progress tracking for bulk processing
-  - Downloadable results for CSV input
+Open the localhost URL printed by Streamlit. Start with a small synthetic input, review the result, then export or continue the workflow.
 
-## How to Use
+## Repository map
 
-1. **Access the App**: 
-   Visit [https://ap-frqs-st-app.streamlit.app/](https://ap-frqs-st-app.streamlit.app/)
+| Path | Role |
+| --- | --- |
+| [`st-qc-frqs.py`](st-qc-frqs.py) | Application entrypoint and workflow logic |
+| [`requirements.txt`](requirements.txt) | Direct Python dependencies |
+| [`requirements.lock.txt`](requirements.lock.txt) | Pinned Python 3.12 dependencies with integrity hashes |
+| [`.github/workflows/repository-quality.yml`](.github/workflows/repository-quality.yml) | Offline maintenance checks |
 
-2. **Enter API Key**:
-   - Input your Anthropic API Key in the provided field
-   - This key is required for the AI-powered evaluations
+## Validation
 
-3. **Choose Input Method**:
-   - **Text Input**: 
-     - Enter FRQ and corresponding lesson plan
-     - Add up to 3 FRQs
-   - **CSV Upload**: 
-     - Prepare a CSV file with columns: QUESTION, LESSON_PLAN
-     - Upload the CSV file
+```bash
+python .github/scripts/repository_check.py --self-test
+python .github/scripts/repository_check.py
+```
 
-4. **Process Questions**:
-   - For text input, click "Evaluate FRQs"
-   - For CSV upload, click "Process CSV"
+CI checks Python syntax, local documentation links and credential patterns without importing the app or calling a model. It does not establish grading accuracy or current provider availability. For integration validation, use synthetic examples and compare the output with known answers.
 
-5. **Review Results**:
-   - Examine individual evaluation aspects
-   - Check the final evaluation for overall quality
-   - For CSV input, download the processed file with results
+## Operating notes
 
-## Local Development
+Model names, remote endpoints and prompt assumptions reflect the original implementation. Review them before connecting current services. Keep provider keys, service-account files and private learning data outside the repository. Any credential previously committed must be rotated; removing it from the current tree does not invalidate earlier copies.
 
-To run the app locally:
+## Contributing
 
-1. Clone the repository
-2. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-3. Run the app:
-   ```
-   streamlit run app.py
-   ```
+Keep changes focused and add regression coverage for behavior changes. Include synthetic reproduction data and the checks actually run. See the account [contribution guide](https://github.com/shi1720/.github/blob/main/CONTRIBUTING.md) and [private security reporting process](https://github.com/shi1720/.github/blob/main/SECURITY.md).
 
-## Security Note
+No open-source license is currently granted by this repository. Preserve existing ownership and obtain permission before reuse or redistribution.
 
-The app requires an Anthropic API key for operation. This key is entered by the user and is not stored or logged by the application. Always keep your API key confidential.
+## Refresh dependencies
 
-## Feedback and Contributions
+```bash
+uv pip compile --python-version 3.12 --universal --generate-hashes requirements.txt -o requirements.lock.txt
+```
 
-We welcome feedback and contributions to improve the AP FRQ Evaluation App. Please open an issue or submit a pull request on our GitHub repository.
+Validate the relevant provider integrations before deploying dependency updates. A lockfile fixes dependency resolution; it does not establish that a historical model endpoint is still available.
