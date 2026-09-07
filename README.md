@@ -38,7 +38,7 @@ python .github/scripts/repository_check.py --self-test
 python .github/scripts/repository_check.py
 ```
 
-CI checks Python syntax, local documentation links and credential patterns without importing the app or calling a model. It does not establish grading accuracy or current provider availability. For integration validation, use synthetic examples and compare the output with known answers.
+CI checks Python syntax, local documentation links, credential patterns and locked dependency compatibility without importing the app or calling a model. Dependency validation contacts the package index; it does not install the application or use provider credentials. It does not establish grading accuracy or current provider availability. For integration validation, use synthetic examples and compare the output with known answers.
 
 ## Operating notes
 

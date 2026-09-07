@@ -25,3 +25,7 @@ jobs:
           python-version: '3.12'
       - run: python .github/scripts/repository_check.py --self-test
       - run: python .github/scripts/repository_check.py
+      - name: Install dependency resolver
+        run: python -m pip install uv==0.12.10
+      - name: Validate locked Python dependencies
+        run: uv pip install --dry-run --system --require-hashes -r requirements.lock.txt
